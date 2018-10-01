@@ -132,18 +132,40 @@ int victim_mac_req(uint8_t *my_mac, uint8_t *v_mac, struct in_addr my_ip, struct
         struct pcap_pkthdr* header;
         const u_char *rcv_buf;
         eth_hdr_custom *rcv_eth;
+        arp_hdr_custom *rcv_arp;
         int res = pcap_next_ex(handle, &header, &rcv_buf);
         if (res == 0) continue;
         if (res == -1 || res == -2) break;
         rcv_eth = (eth_hdr_custom *)rcv_buf;
-        if(ntohs(rcv_eth->eth_type) == 0x0806)
+        if(ntohs(rcv_eth->eth_type) == 0x0806)  // ARP Packet
         {
             printf("ARP packet receive DUMP\n");
             dump((u_char* )rcv_buf, header->caplen);
             printf("\n\n");
-            return 0;
-        }
-    }
+            rcv_buf += sizeof(eth_hdr_custom);
+            rcv_arp = (arp_hdr_custom *)rcv_buf;
+            rcv_buf += sizeof(arp_hdr_custom);
+            if((rcv_arp->hw_type == ntohs((uint16_t)(1))) &&        // Check ARP -> Ether & IP
+                (rcv_arp->proto_type == ntohs((uint16_t)(0x0800))) &&
+                (rcv_arp->hw_add_len == (uint8_t)(6)) &&
+                (rcv_arp->proto_add_len == (uint8_t)(4)) &&
+                (rcv_arp->opcode == ntohs((uint16_t)(2))))
+            {
+                if(!(memcmp(rcv_buf + 6, &v_ip, 4) | memcmp(rcv_buf + 10, my_mac, 6) | memcmp(rcv_buf + 16, &my_ip, 4)))  // Check Me & Victim
+                {
+                    printf("ARP Reply\n");
+                    dump((u_char* )rcv_buf, header->caplen);
+                    printf("\n\n");
+
+                    for(int i=0;i<6;i++)
+                    {
+                        v_mac[i] = (uint8_t)rcv_buf[i];
+                    }  
+                    return 0; 
+                } // if(correct Address)
+            } // if(correct ARP type)
+        } // if(ethertype = ARP)
+    }   //while(all packet)
     free(ETH);
     free(ARP);
 }
