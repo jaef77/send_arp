@@ -10,19 +10,31 @@
 #include <netinet/if_ether.h>
 
 
-typedef struct ethhdr{
+typedef struct eth_hdr_custom{
     uint8_t dest_mac[6];
 	uint8_t source_mac[6];
 	uint16_t eth_type;
-}ethhdr;
+}eth_hdr_custom;
 
-typedef struct arphdr{
+typedef struct arp_hdr_custom{
     uint16_t hw_type;
     uint16_t proto_type;
     uint8_t hw_add_len;
     uint8_t proto_add_len;
     uint16_t opcode;
-}arphdr;
+}arp_hdr_custom;
+
+
+// function for dump
+void dump(const uint8_t* p, int len) {
+	for(int i=0; i<len; i++) {
+		printf("%02x ", *p);
+		p++;
+		if((i & 0x0f) == 0x0f)
+			printf("\n");
+	}
+}
+
 
 // Get Local MAC ADDRESS & IP ADDRESS
 int check_my_add(uint8_t *my_mac, struct in_addr *my_ip, const char *interface)
@@ -58,13 +70,13 @@ int check_my_add(uint8_t *my_mac, struct in_addr *my_ip, const char *interface)
 }
 
 // Get VICTIM'S MAC ADDRESS
-void victim_mac_req(uint8_t *my_mac, uint8_t *v_mac, struct in_addr my_ip, struct in_addr v_ip, const char *interface)
+int victim_mac_req(uint8_t *my_mac, uint8_t *v_mac, struct in_addr my_ip, struct in_addr v_ip, const char *interface)
 {
-    ethhdr *ETH;
-    arphdr *ARP;
+    int debug = 0;
+    eth_hdr_custom *ETH = (eth_hdr_custom*)malloc(sizeof(eth_hdr_custom));
+    arp_hdr_custom *ARP = (arp_hdr_custom*)malloc(sizeof(arp_hdr_custom));
     char errbuf[PCAP_ERRBUF_SIZE];
     char send_buf[BUFSIZ];
-    char rcv_buf[BUFSIZ];
     int offset = 0;
     pcap_t* handle = pcap_open_live(interface, BUFSIZ, 1, 1000, errbuf);
     if(handle == NULL)
@@ -72,14 +84,22 @@ void victim_mac_req(uint8_t *my_mac, uint8_t *v_mac, struct in_addr my_ip, struc
         perror("ERROR : handle is NULL");
         return -1;
     }
+
+    //for debug
+    printf("pcap handle success!\n");
+
     /***************************Send Request**************************/
     // Ethernet Header Setting
-    for(int i=0;i<6;i++)
-        ETH->dest_mac[i] = (uint8_t)(0xFF);
+    memset(ETH->dest_mac, 0xFF, sizeof(ETH->dest_mac));
     memcpy(ETH->source_mac, my_mac, sizeof(ETH->source_mac));
     ETH->eth_type = ntohs(ETHERTYPE_ARP);
-    memcpy(send_buf, ETH, sizeof(ethhdr));
-    offset += sizeof(ethhdr);
+    memcpy(send_buf, ETH, sizeof(eth_hdr_custom));
+
+    //debug
+    printf("ETH hdr copy ok\n");
+
+
+    offset += sizeof(eth_hdr_custom);
 
     // ARP Data Setting
     ARP->hw_type = ntohs((uint16_t)(1));
@@ -88,8 +108,15 @@ void victim_mac_req(uint8_t *my_mac, uint8_t *v_mac, struct in_addr my_ip, struc
     ARP->proto_add_len = (uint8_t)(4);
     ARP->opcode = ntohs((uint16_t)(1));
 
-    memcpy(&send_buf[offset], ARP, sizeof(arphdr));
-    offset += sizeof(arphdr);
+    //debug
+    printf("ARP hdr set ok\n");
+
+    memcpy(&send_buf[offset], ARP, sizeof(arp_hdr_custom));
+    offset += sizeof(arp_hdr_custom);
+
+    //debug
+    printf("ARP hdr copy ok\n");
+
 
     // ARP Address Data Setting
     memcpy(&send_buf[offset], my_mac, 6);
@@ -99,18 +126,31 @@ void victim_mac_req(uint8_t *my_mac, uint8_t *v_mac, struct in_addr my_ip, struc
     for(int i=0;i<6;i++)
         send_buf[offset + i] = 0;
     offset += 6;
-    memcpy(&send_buf[offset], &v_ip);
+    memcpy(&send_buf[offset], &v_ip, 4);
+    offset += 4;
     
     // SEND REQUEST
-    pcap_sendpacket(handle, static_cast<u_char *>(ARP), sizeof(errbuf));
+    pcap_sendpacket(handle, (u_char*)(ARP), sizeof(errbuf));
+
+    printf("send packet dump\n");
+    dump((u_char* )send_buf, offset);
+    printf("\n\n");
 
 
     /***************************Receive Reply**************************/
     while(true)
     {
-        
+        struct pcap_pkthdr* header;
+        const u_char *rcv_buf;
+        int res = pcap_next_ex(handle, &header, &rcv_buf);
+        if (res == 0) continue;
+        if (res == -1 || res == -2) break;
+        printf("receive DUMP\n");
+        dump((u_char* )rcv_buf, header->caplen);
+        printf("\n\n");
     }
-
+    free(ETH);
+    free(ARP);
 }
 
 // Send ARP Reply to the victim
@@ -157,7 +197,16 @@ int main(int argc, char *argv[])
     printf("\n");
 
     // Get Victim's MAC Address
-    // victim_mac_req(victim_mac, victim_ip);
+    victim_mac_req(my_mac, victim_mac, my_ip, victim_ip, argv[1]);
+    printf("Victim's MAC\n");
+    for(int i=0;i<6;i++)
+    {
+        printf("%02X", victim_mac[i]);
+        if(i != 5)
+            printf(":");
+    }
+    printf("\n");
+
 
     // Send ARP Request(False)
     // send_arp_reply(my_mac, victim_mac, my_ip, victim_ip, target_ip);
