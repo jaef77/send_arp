@@ -95,10 +95,6 @@ int victim_mac_req(uint8_t *my_mac, uint8_t *v_mac, struct in_addr my_ip, struct
     ETH->eth_type = ntohs(ETHERTYPE_ARP);
     memcpy(send_buf, ETH, sizeof(eth_hdr_custom));
 
-    //debug
-    printf("ETH hdr copy ok\n");
-
-
     offset += sizeof(eth_hdr_custom);
 
     // ARP Data Setting
@@ -108,15 +104,8 @@ int victim_mac_req(uint8_t *my_mac, uint8_t *v_mac, struct in_addr my_ip, struct
     ARP->proto_add_len = (uint8_t)(4);
     ARP->opcode = ntohs((uint16_t)(1));
 
-    //debug
-    printf("ARP hdr set ok\n");
-
     memcpy(&send_buf[offset], ARP, sizeof(arp_hdr_custom));
     offset += sizeof(arp_hdr_custom);
-
-    //debug
-    printf("ARP hdr copy ok\n");
-
 
     // ARP Address Data Setting
     memcpy(&send_buf[offset], my_mac, 6);
@@ -130,7 +119,7 @@ int victim_mac_req(uint8_t *my_mac, uint8_t *v_mac, struct in_addr my_ip, struct
     offset += 4;
     
     // SEND REQUEST
-    pcap_sendpacket(handle, (u_char*)(ARP), sizeof(errbuf));
+    pcap_sendpacket(handle, (u_char*)(send_buf), offset);
 
     printf("send packet dump\n");
     dump((u_char* )send_buf, offset);
@@ -142,12 +131,18 @@ int victim_mac_req(uint8_t *my_mac, uint8_t *v_mac, struct in_addr my_ip, struct
     {
         struct pcap_pkthdr* header;
         const u_char *rcv_buf;
+        eth_hdr_custom *rcv_eth;
         int res = pcap_next_ex(handle, &header, &rcv_buf);
         if (res == 0) continue;
         if (res == -1 || res == -2) break;
-        printf("receive DUMP\n");
-        dump((u_char* )rcv_buf, header->caplen);
-        printf("\n\n");
+        rcv_eth = (eth_hdr_custom *)rcv_buf;
+        if(ntohs(rcv_eth->eth_type) == 0x0806)
+        {
+            printf("ARP packet receive DUMP\n");
+            dump((u_char* )rcv_buf, header->caplen);
+            printf("\n\n");
+            return 0;
+        }
     }
     free(ETH);
     free(ARP);
